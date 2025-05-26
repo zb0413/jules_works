@@ -1,0 +1,96 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      - POSTGRES_USER=hudi_user
+      - POSTGRES_PASSWORD=hudi_password
+      - POSTGRES_DB=hudi_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    environment:
+      - CLUSTER_NAME=test
+    ports:
+      - "9870:9870"
+      - "9000:9000"
+    volumes:
+      - hadoop_namenode_data:/hadoop/dfs/name
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    environment:
+      - SERVICE_PRECONDITION=namenode:9870
+    depends_on:
+      - namenode
+    volumes:
+      - hadoop_datanode_data:/hadoop/dfs/data
+
+  jobmanager:
+    image: flink:1.17-scala_2.12-java11
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=jobmanager
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+    ports:
+      - "8081:8081"
+    command: jobmanager
+    volumes:
+      - flink_jobmanager_data:/opt/flink/data
+      - ./flink-jars:/opt/flink/lib
+    depends_on:
+      - namenode
+      - datanode
+
+  taskmanager:
+    image: flink:1.17-scala_2.12-java11
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=jobmanager
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 2
+    command: taskmanager
+    volumes:
+      - flink_taskmanager_data:/opt/flink/data
+      - ./flink-jars:/opt/flink/lib
+    depends_on:
+      - jobmanager
+
+  nginx:
+    image: nginx:latest
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/conf/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/logs:/var/log/nginx
+
+  dinky:
+    image: dataisnub/dinky:0.7.3
+    ports:
+      - "8888:8888"
+    environment:
+      - dinky.conf.setting.url=jdbc:postgresql://postgres:5432/hudi_db
+      - dinky.conf.setting.username=hudi_user
+      - dinky.conf.setting.password=hudi_password
+      - dinky.conf.flink.conf.path=/opt/flink/conf
+      - FLINK_HOME=/opt/flink
+    depends_on:
+      - postgres
+      - jobmanager
+    volumes:
+      - dinky_data:/opt/dinky/data
+
+volumes:
+  postgres_data:
+  hadoop_namenode_data:
+  hadoop_datanode_data:
+  flink_jobmanager_data:
+  flink_taskmanager_data:
+  dinky_data:
