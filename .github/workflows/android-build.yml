@@ -1,0 +1,115 @@
+name: Android CI Build
+
+on:
+  push:
+    branches:
+      - main # Or your default branch, e.g., master
+  pull_request:
+    branches:
+      - main
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./ComicReader # Set default working directory for all run steps
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin' # Using Eclipse Temurin, a popular OpenJDK distribution
+          cache: 'gradle'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18' # Or your project's Node.js version
+          cache: 'npm'
+          cache-dependency-path: ComicReader/package-lock.json # Path to your lock file
+
+      - name: Install npm dependencies
+        run: npm ci # Using ci for cleaner installs in CI environments
+
+      - name: Decode Keystore and Setup Gradle Properties
+        # This step assumes you have set up the secrets in your GitHub repository settings
+        # ANDROID_SIGNING_KEY_BASE64: Base64 encoded keystore file
+        # ANDROID_SIGNING_KEY_ALIAS: Your key alias
+        # ANDROID_SIGNING_STORE_PASSWORD: Your store password
+        # ANDROID_SIGNING_KEY_PASSWORD: Your key password
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' # Only run for push to main or manual dispatch
+        env:
+          SIGNING_KEY_BASE64: ${{ secrets.ANDROID_SIGNING_KEY_BASE64 }}
+          KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+        run: |
+          echo "Checking for secrets..."
+          if [ -z "$SIGNING_KEY_BASE64" ] || [ -z "$KEY_ALIAS" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "Required signing secrets are not set. Skipping APK signing and release build."
+            echo "IS_SIGNED_BUILD=false" >> $GITHUB_ENV
+          else
+            echo "Secrets found. Proceeding with signed APK build."
+            echo "IS_SIGNED_BUILD=true" >> $GITHUB_ENV
+            echo "Decoding keystore..."
+            echo $SIGNING_KEY_BASE64 | base64 --decode > android/app/my-release-key.keystore
+            echo "Setting up gradle.properties..."
+            echo "MYAPP_RELEASE_STORE_FILE=my-release-key.keystore" > android/gradle.properties
+            echo "MYAPP_RELEASE_KEY_ALIAS=$KEY_ALIAS" >> android/gradle.properties
+            echo "MYAPP_RELEASE_STORE_PASSWORD=$STORE_PASSWORD" >> android/gradle.properties
+            echo "MYAPP_RELEASE_KEY_PASSWORD=$KEY_PASSWORD" >> android/gradle.properties
+            # Add other properties if needed, e.g. from a template or existing file
+            echo "android.useAndroidX=true" >> android/gradle.properties
+            echo "android.enableJetifier=true" >> android/gradle.properties
+            # Ensure NDK version is set if your project needs it, check rootProject.ext.ndkVersion in project build.gradle
+            # Example: echo "ndkVersion=25.2.9519653" >> android/gradle.properties
+          fi
+        working-directory: ./ComicReader # Ensure this runs in the ComicReader directory
+
+      - name: Grant gradlew execution permission
+        run: chmod +x android/gradlew
+        working-directory: ./ComicReader
+
+      - name: Build Android Release APK
+        if: env.IS_SIGNED_BUILD == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        run: cd android && ./gradlew assembleRelease --no-daemon
+        working-directory: ./ComicReader
+
+      - name: Build Android Debug APK (for PRs or if secrets are missing)
+        if: env.IS_SIGNED_BUILD == 'false' || github.event_name == 'pull_request'
+        run: cd android && ./gradlew assembleDebug --no-daemon
+        working-directory: ./ComicReader
+
+      - name: Upload Release APK
+        if: env.IS_SIGNED_BUILD == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        uses: actions/upload-artifact@v4
+        with:
+          name: comic-reader-release.apk
+          path: ComicReader/android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error # Fail the step if the APK is not found
+
+      - name: Upload Debug APK
+        if: env.IS_SIGNED_BUILD == 'false' || github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: comic-reader-debug.apk
+          path: ComicReader/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Clean up Keystore and Gradle Properties (important for security)
+        if: always() && env.IS_SIGNED_BUILD == 'true' # always() ensures this runs even if previous steps fail
+        run: |
+          echo "Cleaning up sensitive files..."
+          rm -f android/app/my-release-key.keystore
+          rm -f android/gradle.properties
+          # It's better to reconstruct gradle.properties from a template or copy from a non-sensitive source
+          # For now, just deleting it. A better approach would be to only add secrets to it.
+          # A .gitignored gradle.properties in the repo with non-sensitive defaults is a good practice.
+        working-directory: ./ComicReader
