@@ -1,0 +1,5 @@
+com/example/prometheusrocketmqadapter/dto/MetricMessage.class
+com/example/prometheusrocketmqadapter/service/PrometheusRemoteWriteService.class
+com/example/prometheusrocketmqadapter/service/PrometheusService.class
+com/example/prometheusrocketmqadapter/PrometheusRocketmqAdapterApplication.class
+com/example/prometheusrocketmqadapter/service/RocketMQConsumerService.class

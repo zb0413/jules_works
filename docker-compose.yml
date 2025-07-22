@@ -1,6 +1,42 @@
 version: '3.8'
 
 services:
+  prometheus-rocketmq-adapter:
+    build:
+      context: ./prometheus-rocketmq-adapter
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - rocketmq.name-server=rocketmq:9876
+      - prometheus.remote-write.url=http://prometheus:9090/api/v1/write
+    depends_on:
+      - rocketmq
+      - prometheus
+
+  rocketmq:
+    image: apache/rocketmq:4.9.4
+    ports:
+      - "9876:9876"
+      - "10911:10911"
+      - "10912:10912"
+    volumes:
+      - rocketmq_data:/home/rocketmq/store
+
+  prometheus:
+    image: prom/prometheus:v2.37.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--web.enable-remote-write-receiver'
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--web.enable-remote-write-receiver'
+
   postgres:
     image: postgres:13
     environment:
@@ -94,3 +130,5 @@ volumes:
   flink_jobmanager_data:
   flink_taskmanager_data:
   dinky_data:
+  rocketmq_data:
+  prometheus_data:
